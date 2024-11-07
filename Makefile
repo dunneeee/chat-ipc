@@ -19,6 +19,6 @@ server: server.o
 	$(CC) $(CFLAGS) server.o -o server
 
 clean:
-	rm -f $(OBJECTS) $(TARGETS)
+	rm -f $(OBJECTS) $(TARGETS) *.txt
 
 .PHONY: all clean

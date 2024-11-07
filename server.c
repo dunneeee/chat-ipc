@@ -16,7 +16,6 @@ int clients[MAX_CLIENTS] = {0};
 
 void broadcast_message(int sender, const char *message)
 {
-    // Gửi kèm prefix để phân biệt tin nhắn từ các client
     char buffer[BUFFER_SIZE];
     snprintf(buffer, BUFFER_SIZE, "Client %d: %s", sender, message);
 
@@ -123,6 +122,8 @@ int main()
                     close(fd);
                     clients[i] = 0;
                     printf("Client disconnected, fd: %d\n", fd);
+                    snprintf(buffer, BUFFER_SIZE, "Client %d disconnected", fd);
+                    broadcast_message(fd, buffer);
                 }
                 else
                 {
