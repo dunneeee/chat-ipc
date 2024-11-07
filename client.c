@@ -4,17 +4,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <pthread.h>
 #include <time.h>
+#include <sys/wait.h>
 
 #define SOCKET_PATH "/tmp/chat_socket"
 #define BUFFER_SIZE 256
-
-struct thread_args
-{
-    int socket_fd;
-    FILE *output_file;
-};
 
 void get_current_time(char *buffer, size_t buffer_size)
 {
@@ -25,12 +19,8 @@ void get_current_time(char *buffer, size_t buffer_size)
     strftime(buffer, buffer_size, "%Y-%m-%d %H:%M:%S", timeinfo);
 }
 
-void *receive_messages(void *args)
+void receive_messages(int socket_fd, FILE *output_file)
 {
-    struct thread_args *thread_args = (struct thread_args *)args;
-    int socket_fd = thread_args->socket_fd;
-    FILE *output_file = thread_args->output_file;
-
     char buffer[BUFFER_SIZE];
     int bytes_received;
     char time_str[64];
@@ -45,14 +35,10 @@ void *receive_messages(void *args)
 
         printf("%s\n", buffer);
     }
-
-    return NULL;
 }
 
-void *listen_stdin(void *args)
+void listen_stdin(int socket_fd)
 {
-    struct thread_args *thread_args = (struct thread_args *)args;
-    int socket_fd = thread_args->socket_fd;
     char buffer[BUFFER_SIZE];
 
     while (1)
@@ -62,19 +48,15 @@ void *listen_stdin(void *args)
             send(socket_fd, buffer, strlen(buffer), 0);
         }
     }
-
-    return NULL;
 }
 
 int main(int argc, char *argv[])
 {
     int client_fd;
     struct sockaddr_un addr;
-    pthread_t receive_thread, stdin_thread;
     FILE *input_file;
     FILE *output_file;
     char buffer[BUFFER_SIZE];
-    struct thread_args thread_args;
 
     if (argc < 3)
     {
@@ -118,17 +100,23 @@ int main(int argc, char *argv[])
         close(client_fd);
         fclose(input_file);
         fclose(output_file);
-
         exit(EXIT_FAILURE);
     }
 
-    thread_args.socket_fd = client_fd;
-    thread_args.output_file = output_file;
+    pid_t receive_pid = fork();
+    if (receive_pid == 0)
+    {
+        receive_messages(client_fd, output_file);
+        exit(0);
+    }
 
-    pthread_create(&receive_thread, NULL, receive_messages, &thread_args);
-    pthread_create(&stdin_thread, NULL, listen_stdin, &thread_args);
+    pid_t stdin_pid = fork();
+    if (stdin_pid == 0)
+    {
+        listen_stdin(client_fd);
+        exit(0);
+    }
 
-    // Read lines from input file and send them to the server with a delay
     while (fgets(buffer, BUFFER_SIZE, input_file) != NULL)
     {
         send(client_fd, buffer, strlen(buffer), 0);
@@ -139,11 +127,10 @@ int main(int argc, char *argv[])
 
     printf("Finished sending input file. You can now type messages. Press Enter to send.\n");
 
-    pthread_join(receive_thread, NULL);
-    pthread_join(stdin_thread, NULL);
+    waitpid(receive_pid, NULL, 0);
+    waitpid(stdin_pid, NULL, 0);
 
     fclose(output_file);
-
     close(client_fd);
     return 0;
 }
