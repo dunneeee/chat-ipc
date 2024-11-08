@@ -14,10 +14,22 @@
 
 int clients[MAX_CLIENTS] = {0};
 
+int get_position_by_fd(int fd)
+{
+    for (int i = 0; i < MAX_CLIENTS; i++)
+    {
+        if (clients[i] == fd)
+        {
+            return i + 1;
+        }
+    }
+    return -1;
+}
+
 void broadcast_message(int sender, const char *message)
 {
     char buffer[BUFFER_SIZE];
-    snprintf(buffer, BUFFER_SIZE, "Client %d: %s", sender, message);
+    snprintf(buffer, BUFFER_SIZE, "Client %d: %s", get_position_by_fd(sender), message);
 
     for (int i = 0; i < MAX_CLIENTS; i++)
     {
@@ -104,7 +116,7 @@ int main()
                 if (clients[i] == 0)
                 {
                     clients[i] = client_fd;
-                    printf("Client connected, fd: %d\n", client_fd);
+                    printf("Client connected, fd: %d\n", get_position_by_fd(client_fd));
                     break;
                 }
             }
@@ -121,15 +133,15 @@ int main()
 
                     close(fd);
                     clients[i] = 0;
-                    printf("Client disconnected, fd: %d\n", fd);
-                    snprintf(buffer, BUFFER_SIZE, "Client %d disconnected", fd);
+                    printf("Client disconnected, fd: %d\n", get_position_by_fd(fd));
+                    snprintf(buffer, BUFFER_SIZE, "Client %d disconnected", get_position_by_fd(fd));
                     broadcast_message(fd, buffer);
                 }
                 else
                 {
 
                     buffer[bytes_read] = '\0';
-                    printf("Message from client %d: %s\n", fd, buffer);
+                    printf("Message from client %d: %s\n", get_position_by_fd(fd), buffer);
                     broadcast_message(fd, buffer);
                 }
             }
