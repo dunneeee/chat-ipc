@@ -81,7 +81,6 @@ void handle_command(char *cmd)
       return;
     }
 
-    // Get target (all or username)
     token = strtok(NULL, " ");
     if (!token)
     {
@@ -89,7 +88,6 @@ void handle_command(char *cmd)
       return;
     }
 
-    // Get filepath
     char *filepath = strtok(NULL, " ");
     if (!filepath)
     {
@@ -97,7 +95,6 @@ void handle_command(char *cmd)
       return;
     }
 
-    // Read file content
     FILE *fp = fopen(filepath, "r");
     if (!fp)
     {
@@ -105,7 +102,6 @@ void handle_command(char *cmd)
       return;
     }
 
-    // Read file content into message
     char content[BUFFER_SIZE] = {0};
     size_t bytes_read = fread(content, 1, sizeof(content) - 1, fp);
     fclose(fp);
@@ -116,7 +112,6 @@ void handle_command(char *cmd)
       return;
     }
 
-    // Setup message
     Message msg;
     if (strcmp(token, "all") == 0)
     {

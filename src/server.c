@@ -95,7 +95,6 @@ int main()
   fd_set read_fds;
   int max_sd;
 
-  // Create socket
   server_fd = socket(AF_INET, SOCK_STREAM, 0);
 
   address.sin_family = AF_INET;
@@ -144,7 +143,6 @@ int main()
         {
           printf("Client disconnected, socket fd: %d\n", sd);
           close(sd);
-          // Remove client
           for (int j = i; j < client_count - 1; j++)
           {
             clients[j] = clients[j + 1];

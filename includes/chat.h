@@ -15,7 +15,6 @@
 #define MAX_USERNAME 32
 #define MAX_PASSWORD 32
 
-// Message types
 #define MSG_REGISTER 1
 #define MSG_LOGIN 2
 #define MSG_BROADCAST 3
@@ -28,7 +27,7 @@ typedef struct
   char username[MAX_USERNAME];
   char password[MAX_PASSWORD];
   char message[BUFFER_SIZE];
-  char target[MAX_USERNAME]; // For private messages
+  char target[MAX_USERNAME];
 } Message;
 
 typedef struct
