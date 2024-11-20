@@ -1,14 +1,19 @@
 CC = gcc
-CFLAGS = -Wall -g -Iincludes
-LDFLAGS = -lpthread
+CFLAGS = -I./includes
+DEPS = includes/chat.h
 
 all: server client
 
-server: src/server.c src/utils.c
-	$(CC) $(CFLAGS) -o bin/server src/server.c src/utils.c $(LDFLAGS)
+server: src/server.c $(DEPS)
+	$(CC) -o bin/server src/server.c $(CFLAGS)
 
-client: src/client.c src/utils.c
-	$(CC) $(CFLAGS) -o bin/client src/client.c src/utils.c $(LDFLAGS)
+client: src/client.c $(DEPS)
+	$(CC) -o bin/client src/client.c $(CFLAGS)
 
+run-server:
+	./bin/server
+
+run-client:
+	./bin/client
 clean:
 	rm -f bin/server bin/client

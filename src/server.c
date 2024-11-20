@@ -1,163 +1,202 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <arpa/inet.h>
 #include "chat.h"
+#include <stdio.h>
+
+#define PORT 8888
+#define USER_FILE "users.dat"
+
+typedef struct
+{
+  int socket;
+  char username[MAX_USERNAME];
+  int authenticated;
+} Client;
 
 Client clients[MAX_CLIENTS];
 int client_count = 0;
 
-void handle_command(int client_socket, char *command)
+void save_user(User *user)
 {
-  char response[BUFFER_SIZE];
-  if (strncmp(command, "/register", 9) == 0)
+  FILE *fp = fopen(USER_FILE, "ab");
+  if (fp)
   {
-    char username[USERNAME_SIZE], password[USERNAME_SIZE];
-    sscanf(command + 10, "%s %s", username, password);
-    register_user(username, password);
-    snprintf(response, BUFFER_SIZE, "User %s registered successfully.\n", username);
-    send(client_socket, response, strlen(response), 0);
-  }
-  else if (strncmp(command, "/login", 6) == 0)
-  {
-    char command_copy[BUFFER_SIZE];
-    strncpy(command_copy, command, BUFFER_SIZE);
-    char *username = strtok(command_copy + 7, " ");
-    char *password = strtok(NULL, " ");
-
-    if (username != NULL && password != NULL && login_user(username, password) == 1)
-    {
-      snprintf(response, BUFFER_SIZE, "User %s logged in successfully.\n", username);
-      send(client_socket, response, strlen(response), 0);
-      // Save the username in the client structure
-      for (int i = 0; i < client_count; i++)
-      {
-        if (clients[i].socket == client_socket)
-        {
-          strncpy(clients[i].username, username, USERNAME_SIZE);
-          break;
-        }
-      }
-    }
-    else
-    {
-      snprintf(response, BUFFER_SIZE, "Login failed for user %s and password %s.\n", username ? username : "unknown", password ? password : "unknown");
-      send(client_socket, response, strlen(response), 0);
-    }
-  }
-  else if (strncmp(command, "/all", 4) == 0)
-  {
-    broadcast_message(command + 5, client_socket);
-  }
-  else if (strncmp(command, "/private", 8) == 0)
-  {
-    char *username = strtok(command + 9, " ");
-    char *message = strtok(NULL, "\0");
-    private_message(username, message);
-  }
-  else if (strncmp(command, "/help", 5) == 0)
-  {
-    snprintf(response, BUFFER_SIZE,
-             "Available commands:\n"
-             "/register <username> <password> - Register a new user\n"
-             "/login <username> <password> - Login with an existing user\n"
-             "/all <message> - Send a message to all users\n"
-             "/private <username> <message> - Send a private message to a user\n"
-             "/help - Show this help message\n");
-    send(client_socket, response, strlen(response), 0);
+    fwrite(user, sizeof(User), 1, fp);
+    fclose(fp);
+    printf("User %s saved successfully\n", user->username);
   }
   else
   {
-    snprintf(response, BUFFER_SIZE, "Unknown command. Type /help for a list of commands.\n");
-    send(client_socket, response, strlen(response), 0);
+    printf("Failed to open user file for saving\n");
   }
 }
 
-void handle_client(int client_socket)
+int check_user(const char *username, const char *password)
+{
+  FILE *fp = fopen(USER_FILE, "rb");
+  if (!fp)
+  {
+    printf("Failed to open user file for reading\n");
+    return 0;
+  }
+
+  User user;
+  while (fread(&user, sizeof(User), 1, fp))
+  {
+    if (strcmp(user.username, username) == 0 &&
+        strcmp(user.password, password) == 0)
+    {
+      fclose(fp);
+      printf("User %s authenticated successfully\n", username);
+      return 1;
+    }
+  }
+  fclose(fp);
+  printf("Authentication failed for user %s\n", username);
+  return 0;
+}
+
+void broadcast_message(const char *sender, const char *message)
 {
   char buffer[BUFFER_SIZE];
-  int bytes_received;
+  snprintf(buffer, BUFFER_SIZE, "%s: %s", sender, message);
 
-  while ((bytes_received = recv(client_socket, buffer, BUFFER_SIZE, 0)) > 0)
-  {
-    buffer[bytes_received] = '\0';
-    if (buffer[0] == '/')
-    {
-      handle_command(client_socket, buffer);
-    }
-    else if (strncmp(buffer, "/all", 4) == 0)
-    {
-      broadcast_message(buffer + 5, client_socket);
-    }
-    else if (strncmp(buffer, "/private", 8) == 0)
-    {
-      char *username = strtok(buffer + 9, " ");
-      char *message = strtok(NULL, "\0");
-      private_message(username, message);
-    }
-  }
+  printf("Broadcasting message from %s: %s\n", sender, message);
 
-  close(client_socket);
-}
-
-void broadcast_message(const char *message, int exclude_socket)
-{
   for (int i = 0; i < client_count; i++)
   {
-    if (clients[i].socket != exclude_socket)
+    if (clients[i].authenticated)
     {
-      send(clients[i].socket, message, strlen(message), 0);
+      send(clients[i].socket, buffer, strlen(buffer), 0);
     }
   }
 }
 
-void private_message(const char *username, const char *message)
+void private_message(const char *sender, const char *target, const char *message)
 {
+  char buffer[BUFFER_SIZE];
+  snprintf(buffer, BUFFER_SIZE, "[PM] %s: %s", sender, message);
+
+  printf("Sending private message from %s to %s: %s\n", sender, target, message);
+
   for (int i = 0; i < client_count; i++)
   {
-    if (strcmp(clients[i].username, username) == 0)
+    if (clients[i].authenticated && strcmp(clients[i].username, target) == 0)
     {
-      send(clients[i].socket, message, strlen(message), 0);
-      break;
+      send(clients[i].socket, buffer, strlen(buffer), 0);
+      return;
     }
   }
+  printf("User %s not found for private message\n", target);
 }
 
 int main()
 {
-  int server_socket, client_socket;
-  struct sockaddr_in server_addr, client_addr;
-  socklen_t client_addr_len = sizeof(client_addr);
+  int server_fd;
+  struct sockaddr_in address;
+  fd_set read_fds;
+  int max_sd;
 
-  server_socket = socket(AF_INET, SOCK_STREAM, 0);
-  server_addr.sin_family = AF_INET;
-  server_addr.sin_addr.s_addr = INADDR_ANY;
-  server_addr.sin_port = htons(8080);
+  // Create socket
+  server_fd = socket(AF_INET, SOCK_STREAM, 0);
 
-  bind(server_socket, (struct sockaddr *)&server_addr, sizeof(server_addr));
-  listen(server_socket, 10);
+  address.sin_family = AF_INET;
+  address.sin_addr.s_addr = INADDR_ANY;
+  address.sin_port = htons(PORT);
 
-  printf("Server is listening on port 8080...\n");
+  bind(server_fd, (struct sockaddr *)&address, sizeof(address));
+  listen(server_fd, 3);
 
-  while ((client_socket = accept(server_socket, (struct sockaddr *)&client_addr, &client_addr_len)) > 0)
+  printf("Chat server started on port %d\n", PORT);
+
+  while (1)
   {
-    if (client_count < MAX_CLIENTS)
+    FD_ZERO(&read_fds);
+    FD_SET(server_fd, &read_fds);
+    max_sd = server_fd;
+
+    for (int i = 0; i < client_count; i++)
     {
-      clients[client_count].socket = client_socket;
-      client_count++;
-      if (fork() == 0)
-      {
-        handle_client(client_socket);
-        exit(0);
-      }
+      int sd = clients[i].socket;
+      FD_SET(sd, &read_fds);
+      max_sd = (sd > max_sd) ? sd : max_sd;
     }
-    else
+
+    select(max_sd + 1, &read_fds, NULL, NULL, NULL);
+
+    if (FD_ISSET(server_fd, &read_fds))
     {
-      close(client_socket);
+      int new_socket = accept(server_fd, NULL, NULL);
+      clients[client_count].socket = new_socket;
+      clients[client_count].authenticated = 0;
+      client_count++;
+      printf("New client connected, socket fd: %d\n", new_socket);
+    }
+
+    for (int i = 0; i < client_count; i++)
+    {
+      int sd = clients[i].socket;
+
+      if (FD_ISSET(sd, &read_fds))
+      {
+        Message msg;
+        int valread = read(sd, &msg, sizeof(Message));
+
+        if (valread == 0)
+        {
+          printf("Client disconnected, socket fd: %d\n", sd);
+          close(sd);
+          // Remove client
+          for (int j = i; j < client_count - 1; j++)
+          {
+            clients[j] = clients[j + 1];
+          }
+          client_count--;
+          continue;
+        }
+
+        switch (msg.type)
+        {
+        case MSG_REGISTER:
+        {
+          User new_user;
+          strcpy(new_user.username, msg.username);
+          strcpy(new_user.password, msg.password);
+          save_user(&new_user);
+          send(sd, "Registration successful", 22, 0);
+          printf("User %s registered\n", msg.username);
+          break;
+        }
+        case MSG_LOGIN:
+        {
+          if (check_user(msg.username, msg.password))
+          {
+            strcpy(clients[i].username, msg.username);
+            clients[i].authenticated = 1;
+            send(sd, "Login successful", 16, 0);
+            printf("User %s logged in\n", msg.username);
+          }
+          else
+          {
+            send(sd, "Login failed", 11, 0);
+            printf("Login failed for user %s\n", msg.username);
+          }
+          break;
+        }
+        case MSG_BROADCAST:
+          if (clients[i].authenticated)
+          {
+            broadcast_message(clients[i].username, msg.message);
+          }
+          break;
+        case MSG_PRIVATE:
+          if (clients[i].authenticated)
+          {
+            private_message(clients[i].username, msg.target, msg.message);
+          }
+          break;
+        }
+      }
     }
   }
 
-  close(server_socket);
   return 0;
 }

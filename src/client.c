@@ -1,83 +1,212 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <arpa/inet.h>
 #include "chat.h"
+#include <time.h>
 
-void chat(int socket)
+#define SERVER_IP "127.0.0.1"
+#define PORT 8888
+
+int sock_fd;
+char current_user[MAX_USERNAME] = "";
+
+void send_message(Message *msg)
 {
-  char buffer[BUFFER_SIZE];
-  while (1)
-  {
-    fgets(buffer, BUFFER_SIZE, stdin);
-    send(socket, buffer, strlen(buffer), 0);
-  }
+  send(sock_fd, msg, sizeof(Message), 0);
 }
 
-void handle_command(int client_socket, char *command)
+void handle_command(char *cmd)
 {
-  if (strncmp(command, "/help", 5) == 0)
-  {
-    printf("Available commands:\n"
-           "/register <username> <password> - Register a new user\n"
-           "/login <username> <password> - Login with an existing user\n"
-           "/all <message> - Send a message to all users\n"
-           "/private <username> <message> - Send a private message to a user\n"
-           "/help - Show this help message\n");
-  }
-  else
-  {
-    printf("Received command from server: %s\n", command);
-  }
-}
+  Message msg;
+  char *token = strtok(cmd, " ");
 
-void handle_client(int client_socket)
-{
-  char buffer[BUFFER_SIZE];
-  int bytes_received;
-
-  while ((bytes_received = recv(client_socket, buffer, BUFFER_SIZE, 0)) > 0)
+  if (strcmp(token, "/register") == 0)
   {
-    buffer[bytes_received] = '\0';
-    if (buffer[0] == '/')
+    msg.type = MSG_REGISTER;
+    token = strtok(NULL, " ");
+    if (!token)
     {
-      handle_command(client_socket, buffer);
+      printf("Usage: /register username password\n");
+      return;
     }
+    strcpy(msg.username, token);
+    token = strtok(NULL, " ");
+    if (!token)
+    {
+      printf("Usage: /register username password\n");
+      return;
+    }
+    strcpy(msg.password, token);
+    send_message(&msg);
   }
+  else if (strcmp(token, "/login") == 0)
+  {
+    msg.type = MSG_LOGIN;
+    token = strtok(NULL, " ");
+    if (!token)
+    {
+      printf("Usage: /login username password\n");
+      return;
+    }
+    strcpy(msg.username, token);
+    token = strtok(NULL, " ");
+    if (!token)
+    {
+      printf("Usage: /login username password\n");
+      return;
+    }
+    strcpy(msg.password, token);
+    strcpy(current_user, msg.username);
+    send_message(&msg);
+  }
+  else if (strcmp(token, "/all") == 0)
+  {
+    if (strlen(current_user) == 0)
+    {
+      printf("Please login first\n");
+      return;
+    }
+    msg.type = MSG_BROADCAST;
+    token = strtok(NULL, "");
+    if (!token)
+    {
+      printf("Usage: /all message\n");
+      return;
+    }
+    strcpy(msg.message, token);
+    send_message(&msg);
+  }
+  else if (strcmp(token, "/input") == 0)
+  {
+    if (strlen(current_user) == 0)
+    {
+      printf("Please login first\n");
+      return;
+    }
 
-  close(client_socket);
+    // Get target (all or username)
+    token = strtok(NULL, " ");
+    if (!token)
+    {
+      printf("Usage: /input <all|username> <filepath>\n");
+      return;
+    }
+
+    // Get filepath
+    char *filepath = strtok(NULL, " ");
+    if (!filepath)
+    {
+      printf("Usage: /input <all|username> <filepath>\n");
+      return;
+    }
+
+    // Read file content
+    FILE *fp = fopen(filepath, "r");
+    if (!fp)
+    {
+      printf("Error: Cannot open file %s\n", filepath);
+      return;
+    }
+
+    // Read file content into message
+    char content[BUFFER_SIZE] = {0};
+    size_t bytes_read = fread(content, 1, sizeof(content) - 1, fp);
+    fclose(fp);
+
+    if (bytes_read == 0)
+    {
+      printf("Error: File is empty or could not be read\n");
+      return;
+    }
+
+    // Setup message
+    Message msg;
+    if (strcmp(token, "all") == 0)
+    {
+      msg.type = MSG_BROADCAST;
+      strcpy(msg.message, content);
+    }
+    else
+    {
+      msg.type = MSG_PRIVATE;
+      strcpy(msg.target, token);
+      strcpy(msg.message, content);
+    }
+
+    send_message(&msg);
+  }
+  else if (token[0] == '/')
+  {
+    if (strlen(current_user) == 0)
+    {
+      printf("Please login first\n");
+      return;
+    }
+    msg.type = MSG_PRIVATE;
+    strcpy(msg.target, token + 1);
+    token = strtok(NULL, "");
+    if (!token)
+    {
+      printf("Usage: /username message\n");
+      return;
+    }
+    strcpy(msg.message, token);
+    send_message(&msg);
+  }
 }
 
 int main()
 {
-  int client_socket;
-  struct sockaddr_in server_addr;
+  struct sockaddr_in serv_addr;
+  char buffer[BUFFER_SIZE];
+  fd_set read_fds;
 
-  client_socket = socket(AF_INET, SOCK_STREAM, 0);
-  server_addr.sin_family = AF_INET;
-  server_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
-  server_addr.sin_port = htons(8080);
+  sock_fd = socket(AF_INET, SOCK_STREAM, 0);
 
-  connect(client_socket, (struct sockaddr *)&server_addr, sizeof(server_addr));
+  serv_addr.sin_family = AF_INET;
+  serv_addr.sin_port = htons(PORT);
+  inet_pton(AF_INET, SERVER_IP, &serv_addr.sin_addr);
 
-  printf("Connected to the server. Type your messages...\n");
+  connect(sock_fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr));
 
-  if (fork() == 0)
+  printf("Connected to chat server\n");
+  printf("Commands:\n");
+  printf("/register username password\n");
+  printf("/login username password\n");
+  printf("/all message\n");
+  printf("/username message\n");
+
+  while (1)
   {
-    chat(client_socket);
-  }
-  else
-  {
-    char buffer[BUFFER_SIZE];
-    int bytes_received;
-    while ((bytes_received = recv(client_socket, buffer, BUFFER_SIZE, 0)) > 0)
+    FD_ZERO(&read_fds);
+    FD_SET(STDIN_FILENO, &read_fds);
+    FD_SET(sock_fd, &read_fds);
+
+    select(sock_fd + 1, &read_fds, NULL, NULL, NULL);
+
+    if (FD_ISSET(STDIN_FILENO, &read_fds))
     {
-      buffer[bytes_received] = '\0';
-      printf("%s\n", buffer);
+      fgets(buffer, BUFFER_SIZE, stdin);
+      buffer[strcspn(buffer, "\n")] = 0;
+      handle_command(buffer);
+    }
+
+    if (FD_ISSET(sock_fd, &read_fds))
+    {
+      int valread = read(sock_fd, buffer, BUFFER_SIZE);
+      if (valread == 0)
+      {
+        printf("Server disconnected\n");
+        return 0;
+      }
+
+      time_t now = time(NULL);
+      struct tm *t = localtime(&now);
+
+      char timestamp[32];
+      strftime(timestamp, sizeof(timestamp), "[%H:%M:%S - %d/%m/%Y]", t);
+
+      buffer[valread] = 0;
+      printf("%s %s\n", timestamp, buffer);
     }
   }
 
-  close(client_socket);
   return 0;
 }
