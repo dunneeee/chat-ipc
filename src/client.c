@@ -1,5 +1,6 @@
 #include "chat.h"
 #include <time.h>
+#include <sys/stat.h> // Include this header for mkdir
 
 #define SERVER_IP "127.0.0.1"
 #define PORT 8888
@@ -10,6 +11,35 @@ char current_user[MAX_USERNAME] = "";
 void send_message(Message *msg)
 {
   send(sock_fd, msg, sizeof(Message), 0);
+}
+
+void save_message(const char *username, const char *message, const char *direction)
+{
+  char dir_path[BUFFER_SIZE];
+  snprintf(dir_path, sizeof(dir_path), "data/%s", username);
+  mkdir(dir_path, 0777);
+
+  char file_path[BUFFER_SIZE + 32]; // Increase buffer size to avoid truncation
+  snprintf(file_path, sizeof(file_path), "%s/%s.txt", dir_path, direction);
+
+  FILE *file = fopen(file_path, "a");
+  if (!file)
+  {
+    // Try to create the file if it does not exist
+    file = fopen(file_path, "w");
+    if (!file)
+    {
+      printf("Error: Cannot open file %s\n", file_path);
+      return;
+    }
+  }
+
+  time_t now = time(NULL);
+  struct tm *t = localtime(&now);
+  char timestamp[32];
+  strftime(timestamp, sizeof(timestamp), "[%H:%M:%S - %d/%m/%Y]", t);
+  fprintf(file, "%s %s\n", timestamp, message);
+  fclose(file);
 }
 
 void handle_command(char *cmd)
@@ -71,6 +101,7 @@ void handle_command(char *cmd)
       return;
     }
     strcpy(msg.message, token);
+    save_message(current_user, msg.message, "outgoing");
     send_message(&msg);
   }
   else if (strcmp(token, "/input") == 0)
@@ -125,6 +156,7 @@ void handle_command(char *cmd)
       strcpy(msg.message, content);
     }
 
+    save_message(current_user, msg.message, "outgoing");
     send_message(&msg);
   }
   else if (token[0] == '/')
@@ -143,6 +175,7 @@ void handle_command(char *cmd)
       return;
     }
     strcpy(msg.message, token);
+    save_message(current_user, msg.message, "outgoing");
     send_message(&msg);
   }
 }
@@ -200,6 +233,16 @@ int main()
 
       buffer[valread] = 0;
       printf("%s %s\n", timestamp, buffer);
+
+      // Save incoming message
+      if (strstr(buffer, "all") != NULL)
+      {
+        save_message("all", buffer, "incoming");
+      }
+      else
+      {
+        save_message(current_user, buffer, "incoming");
+      }
     }
   }
 
